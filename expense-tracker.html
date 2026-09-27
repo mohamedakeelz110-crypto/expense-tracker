@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Expense Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --text:#eef0f3; --muted:#9aa2b1;
+    --accent:#6c8cff; --danger:#ff6b6b; --safe:#43c98a; --border:#252a35;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f4f5f8; --card:#ffffff; --text:#1c1f26; --muted:#6b7280;
+      --accent:#4a6cf7; --border:#e4e6ec;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; justify-content:center;
+  }
+  .app{ width:100%; max-width:480px; padding:16px; padding-bottom:40px; }
+  h1{ font-size:1.3rem; margin:8px 0 16px; }
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:16px; margin-bottom:16px;
+  }
+  .summary{ display:flex; justify-content:space-between; text-align:center; }
+  .summary div{ flex:1; }
+  .summary .label{ font-size:.75rem; color:var(--muted); }
+  .summary .value{ font-size:1.15rem; font-weight:600; margin-top:2px; }
+  #remaining.over{ color:var(--danger); }
+  #remaining.under{ color:var(--safe); }
+  form{ display:flex; flex-direction:column; gap:10px; }
+  label{ font-size:.8rem; color:var(--muted); }
+  input, select{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--bg); color:var(--text); font-size:1rem;
+  }
+  button{
+    padding:11px; border:none; border-radius:8px; background:var(--accent);
+    color:#fff; font-size:1rem; font-weight:600; cursor:pointer;
+  }
+  button.secondary{ background:transparent; border:1px solid var(--border); color:var(--text); }
+  ul{ list-style:none; margin:0; padding:0; }
+  li{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 0; border-bottom:1px solid var(--border); font-size:.9rem;
+  }
+  li:last-child{ border-bottom:none; }
+  .meta{ color:var(--muted); font-size:.75rem; }
+  .amt{ font-weight:600; }
+  .del{ background:none; border:none; color:var(--danger); font-size:1.1rem; padding:0 6px; }
+  canvas{ max-width:100%; }
+  .empty{ color:var(--muted); font-size:.85rem; text-align:center; padding:10px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>💸 Expense Tracker</h1>
+
+  <div class="card summary">
+    <div><div class="label">Budget</div><div class="value" id="budgetDisplay">₹0</div></div>
+    <div><div class="label">Spent</div><div class="value" id="spentDisplay">₹0</div></div>
+    <div><div class="label">Remaining</div><div class="value" id="remaining">₹0</div></div>
+  </div>
+
+  <div class="card">
+    <label for="budgetInput">Monthly Budget (₹)</label>
+    <form id="budgetForm" style="flex-direction:row; gap:8px; margin-top:6px;">
+      <input type="number" id="budgetInput" placeholder="e.g. 5000" min="0">
+      <button type="submit" style="width:auto; padding:10px 16px;">Set</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <form id="expenseForm">
+      <div>
+        <label for="amount">Amount (₹)</label>
+        <input type="number" id="amount" placeholder="e.g. 250" min="0" required>
+      </div>
+      <div>
+        <label for="category">Category</label>
+        <select id="category">
+          <option>Food</option>
+          <option>Travel</option>
+          <option>Shopping</option>
+          <option>Bills</option>
+          <option>Entertainment</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div>
+        <label for="note">Note (optional)</label>
+        <input type="text" id="note" placeholder="e.g. lunch with friends">
+      </div>
+      <button type="submit">Add Expense</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <canvas id="pieChart" height="220"></canvas>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <strong style="font-size:.95rem;">Recent Expenses</strong>
+      <button class="secondary" id="clearAll" style="width:auto; padding:6px 10px; font-size:.8rem;">Clear All</button>
+    </div>
+    <ul id="expenseList"></ul>
+    <div class="empty" id="emptyMsg">No expenses yet — add your first one above.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'expenses_v1';
+  const BUDGET_KEY = 'budget_v1';
+
+  let expenses = [];
+  let budget = 0;
+
+  try {
+    expenses = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch(e){ expenses = []; }
+  try {
+    budget = parseFloat(localStorage.getItem(BUDGET_KEY)) || 0;
+  } catch(e){ budget = 0; }
+
+  const categoryColors = {
+    Food:'#6c8cff', Travel:'#43c98a', Shopping:'#ffb84d',
+    Bills:'#ff6b6b', Entertainment:'#c77dff', Other:'#9aa2b1'
+  };
+
+  const budgetForm = document.getElementById('budgetForm');
+  const budgetInput = document.getElementById('budgetInput');
+  const expenseForm = document.getElementById('expenseForm');
+  const amountInput = document.getElementById('amount');
+  const categoryInput = document.getElementById('category');
+  const noteInput = document.getElementById('note');
+  const expenseList = document.getElementById('expenseList');
+  const emptyMsg = document.getElementById('emptyMsg');
+  const clearAllBtn = document.getElementById('clearAll');
+
+  let pieChart = null;
+
+  function save(){
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+      localStorage.setItem(BUDGET_KEY, String(budget));
+    } catch(e){ console.error('Storage error', e); }
+  }
+
+  function formatMoney(n){
+    return '₹' + Number(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+  }
+
+  function render(){
+    budgetInput.value = budget || '';
+    document.getElementById('budgetDisplay').textContent = formatMoney(budget);
+
+    const spent = expenses.reduce((sum, e) => sum + e.amount, 0);
+    document.getElementById('spentDisplay').textContent = formatMoney(spent);
+
+    const remainingEl = document.getElementById('remaining');
+    const remaining = budget - spent;
+    remainingEl.textContent = formatMoney(remaining);
+    remainingEl.classList.remove('over','under');
+    remainingEl.classList.add(remaining < 0 ? 'over' : 'under');
+
+    expenseList.innerHTML = '';
+    if(expenses.length === 0){
+      emptyMsg.style.display = 'block';
+    } else {
+      emptyMsg.style.display = 'none';
+      expenses.slice().reverse().forEach(exp => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <div>
+            <div>${exp.category}${exp.note ? ' — ' + exp.note : ''}</div>
+            <div class="meta">${exp.date}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="amt">${formatMoney(exp.amount)}</span>
+            <button class="del" data-id="${exp.id}">✕</button>
+          </div>`;
+        expenseList.appendChild(li);
+      });
+    }
+
+    updateChart();
+  }
+
+  function updateChart(){
+    const totals = {};
+    expenses.forEach(e => { totals[e.category] = (totals[e.category] || 0) + e.amount; });
+    const labels = Object.keys(totals);
+    const data = Object.values(totals);
+    const colors = labels.map(l => categoryColors[l] || '#9aa2b1');
+
+    const spent = data.reduce((a,b) => a + b, 0);
+    const remaining = budget - spent;
+
+    // Show budget breakdown: spent-by-category slices + a "Remaining" slice.
+    // If nothing set/spent yet, skip rendering.
+    if(labels.length === 0 && budget <= 0){
+      const ctx0 = document.getElementById('pieChart').getContext('2d');
+      if(pieChart) pieChart.destroy();
+      return;
+    }
+
+    const chartLabels = labels.slice();
+    const chartData = data.slice();
+    const chartColors = colors.slice();
+
+    if(remaining > 0){
+      chartLabels.push('Remaining');
+      chartData.push(remaining);
+      chartColors.push('#3a3f4d');
+    } else if(budget > 0 && remaining < 0){
+      chartLabels.push('Over Budget');
+      chartData.push(Math.abs(remaining));
+      chartColors.push('#ff6b6b');
+    }
+
+    const ctx = document.getElementById('pieChart').getContext('2d');
+    if(pieChart) pieChart.destroy();
+
+    if(chartLabels.length === 0){
+      return;
+    }
+
+    pieChart = new Chart(ctx, {
+      type: 'pie',
+      data: {
+        labels: chartLabels,
+        datasets: [{ data: chartData, backgroundColor: chartColors, borderWidth: 0 }]
+      },
+      options: {
+        plugins: {
+          legend: { labels: { color: getComputedStyle(document.body).color } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx){
+                const val = ctx.parsed;
+                const pct = budget > 0 ? ((val / budget) * 100).toFixed(1) : ((val/spent)*100).toFixed(1);
+                return `${ctx.label}: ₹${val.toLocaleString('en-IN')} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  budgetForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    budget = parseFloat(budgetInput.value) || 0;
+    save();
+    render();
+  });
+
+  expenseForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    const amount = parseFloat(amountInput.value);
+    if(!amount || amount <= 0) return;
+    expenses.push({
+      id: Date.now(),
+      amount,
+      category: categoryInput.value,
+      note: noteInput.value.trim(),
+      date: new Date().toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'})
+    });
+    save();
+    expenseForm.reset();
+    render();
+  });
+
+  expenseList.addEventListener('click', function(e){
+    if(e.target.classList.contains('del')){
+      const id = Number(e.target.dataset.id);
+      expenses = expenses.filter(exp => exp.id !== id);
+      save();
+      render();
+    }
+  });
+
+  clearAllBtn.addEventListener('click', function(){
+    if(confirm('Clear all expenses? This cannot be undone.')){
+      expenses = [];
+      save();
+      render();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
