@@ -25,5 +25,5 @@ A simple, responsive expense/budget tracker web app that helps you log daily exp
 
 ## Author
 **Mohamed Akeel**  
-Cyber Security Engineering Student | Web Developer Intern @ InAmigos Foundation
+Cyber Security Engineering Student
 ![Expense Tracker Screenshot](screenshot.png)
